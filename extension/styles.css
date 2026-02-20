@@ -1,0 +1,111 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background: #f7f9fc;
+  color: #1a1f2b;
+  min-width: 340px;
+}
+
+.container {
+  padding: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.5px;
+}
+
+.subtitle {
+  margin: 4px 0 12px;
+  color: #526174;
+  font-size: 13px;
+}
+
+.usage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.usage-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.empty-state {
+  margin: 0 0 12px;
+  color: #67768a;
+  font-size: 13px;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 12px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+label {
+  display: block;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input[type="text"],
+textarea {
+  width: 100%;
+  border: 1px solid #c7d2e0;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+button {
+  width: 100%;
+  margin-top: 10px;
+  border: none;
+  background: #0d6efd;
+  color: white;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #0a58ca;
+}
+
+.save-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+}

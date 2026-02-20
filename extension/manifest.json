@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "FOCUSTAB - AI Enhanced Tab Time Tracker",
+  "version": "1.0.0",
+  "description": "Tracks browsing time, syncs with backend analytics, and alerts on focus limit breaches.",
+   "icons": {
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "permissions": [
+    "tabs",
+    "storage",
+    "notifications",
+    "activeTab",
+    "scripting",
+    "alarms",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "https://localhost:8000/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  }
+}
