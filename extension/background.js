@@ -29,7 +29,6 @@ function getDomain(url) {
 }
 
 function nowIso() { return new Date().toISOString(); }
-
 async function get(keys) { return chrome.storage.local.get(keys); }
 async function set(obj) { return chrome.storage.local.set(obj); }
 
@@ -102,7 +101,52 @@ async function flushSession() {
   await setSession(session.domain, now);
 }
 
-// ── Check limit ───────────────────────────────────────────
+// ── Show in-page alert ────────────────────────────────────
+function showAlert(tabId, domain, mins) {
+  chrome.scripting.executeScript({
+    target: { tabId: tabId, allFrames: false },
+    world: "MAIN",
+    func: function(domain, mins) {
+      // Remove existing alert if any
+      var old = document.getElementById("focustab-limit-alert");
+      if (old) old.remove();
+
+      var div = document.createElement("div");
+      div.id = "focustab-limit-alert";
+      div.style.cssText = [
+        "position: fixed",
+        "top: 20px",
+        "right: 20px",
+        "z-index: 2147483647",
+        "background: #0d0f12",
+        "color: #e8eaf0",
+        "border: 1px solid #00e5a0",
+        "border-left: 4px solid #00e5a0",
+        "border-radius: 10px",
+        "padding: 16px 20px",
+        "font-family: -apple-system, sans-serif",
+        "font-size: 14px",
+        "line-height: 1.5",
+        "box-shadow: 0 8px 32px rgba(0,0,0,0.6)",
+        "max-width: 300px",
+        "min-width: 240px"
+      ].join(";");
+
+      div.innerHTML =
+        "<div style='color:#00e5a0;font-weight:700;font-size:15px;margin-bottom:8px'>⏱ Time Limit Reached</div>" +
+        "<div>You've used your <strong>" + mins + " min</strong> daily limit on <strong>" + domain + "</strong>.</div>" +
+        "<div style='margin-top:10px;font-size:11px;color:#6b7280'>This message will be closed soon.</div>";
+
+      document.body.appendChild(div);
+      setTimeout(function() { if (div && div.parentNode) div.remove(); }, 8000);
+    },
+    args: [domain, mins]
+  }).catch(function(e) {
+    console.warn("Could not inject alert into tab:", e.message);
+  });
+}
+
+// ── Check time limit ──────────────────────────────────────
 async function checkLimit() {
   const session = await getSession();
   if (!session || !session.domain) return;
@@ -123,11 +167,18 @@ async function checkLimit() {
   const notified = Array.isArray(s[STORAGE_KEYS.NOTIFIED_DOMAINS]) ? s[STORAGE_KEYS.NOTIFIED_DOMAINS] : [];
   const mins = Math.round(limit / 60);
 
+  // Get active tab first
+  const tabs = await new Promise(function(resolve) {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(t) { resolve(t || []); });
+  });
+  const activeTab = tabs[0];
+
   if (!notified.includes(session.domain)) {
+    // Mark notified
     notified.push(session.domain);
     await set({ [STORAGE_KEYS.NOTIFIED_DOMAINS]: notified });
 
-    // System notification
+    // System notification (backup)
     chrome.notifications.create("limit-" + session.domain + "-" + Date.now(), {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icon.png"),
@@ -136,33 +187,17 @@ async function checkLimit() {
     });
 
     // In-page alert
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(tabs) {
-      if (!tabs || !tabs[0] || !tabs[0].id) return;
-      chrome.scripting.executeScript({
-        target: { tabId: tabs[0].id },
-        func: function(domain, mins) {
-          var old = document.getElementById("focustab-alert");
-          if (old) old.remove();
-          var div = document.createElement("div");
-          div.id = "focustab-alert";
-          div.style.cssText = "position:fixed;top:24px;right:24px;z-index:2147483647;background:#0d0f12;color:#e8eaf0;border:1px solid #00e5a0;border-left:4px solid #00e5a0;border-radius:10px;padding:16px 20px;font-family:sans-serif;font-size:14px;line-height:1.5;box-shadow:0 8px 32px rgba(0,0,0,0.6);max-width:320px;";
-          div.innerHTML = "<div style='color:#00e5a0;font-weight:700;margin-bottom:6px'>⏱ Time Limit Reached</div><div>You've used your <strong>" + mins + " min</strong> daily limit on <strong>" + domain + "</strong>.</div>";
-          document.body.appendChild(div);
-          setTimeout(function() { if (div.parentNode) div.remove(); }, 8000);
-        },
-        args: [session.domain, mins]
-      });
-    });
+    if (activeTab && activeTab.id) {
+      showAlert(activeTab.id, session.domain, mins);
+    }
   }
 
   // Block and redirect if toggle on
   if (s[STORAGE_KEYS.BLOCKING_ENABLED]) {
     await blockDomain(session.domain);
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(tabs) {
-      if (tabs && tabs[0] && tabs[0].id) {
-        chrome.tabs.update(tabs[0].id, { url: "chrome://newtab" });
-      }
-    });
+    if (activeTab && activeTab.id) {
+      chrome.tabs.update(activeTab.id, { url: "chrome://newtab" });
+    }
   }
 }
 
@@ -185,18 +220,18 @@ async function blockDomain(domain) {
 
 async function applyBlockRules() {
   if (!chrome.declarativeNetRequest) return;
-  const s = await get([STORAGE_KEYS.BLOCKED_SITES, STORAGE_KEYS.BLOCKING_ENABLED]);
+  const s = await get([STORAGE_KEYS.BLOCKED_SITES]);
   const sites = Array.isArray(s[STORAGE_KEYS.BLOCKED_SITES]) ? s[STORAGE_KEYS.BLOCKED_SITES] : [];
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
-  const removeIds = existing.map(r => r.id);
-
-  // Always block sites in blocked_sites list regardless of toggle
+  const removeIds = existing.map(function(r) { return r.id; });
   if (!sites.length) {
     if (removeIds.length) await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds });
     return;
   }
-  const addRules = sites.map(d => ({ id: ruleId(d), priority: 1, action: { type: "block" }, condition: { urlFilter: "||" + d + "^", resourceTypes: ["main_frame"] } }));
-  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules });
+  const addRules = sites.map(function(d) {
+    return { id: ruleId(d), priority: 1, action: { type: "block" }, condition: { urlFilter: "||" + d + "^", resourceTypes: ["main_frame"] } };
+  });
+  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds, addRules: addRules });
 }
 
 // ── Session management ────────────────────────────────────
@@ -248,16 +283,19 @@ function makeAlarms() {
   chrome.alarms.create("sync", { periodInMinutes: 60 });
 }
 
+function initSession() {
+  chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(tabs) {
+    if (tabs && tabs[0]) startSession(tabs[0].id);
+  });
+}
+
 // ── Listeners ─────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(async () => {
   await ensureDefaults();
   await syncPrefs();
   await applyBlockRules();
   chrome.alarms.clearAll(makeAlarms);
-  // Start session for current tab
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(tabs) {
-    if (tabs && tabs[0]) startSession(tabs[0].id);
-  });
+  initSession();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -265,9 +303,7 @@ chrome.runtime.onStartup.addListener(async () => {
   await resetDaily();
   await applyBlockRules();
   chrome.alarms.clearAll(makeAlarms);
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(tabs) {
-    if (tabs && tabs[0]) startSession(tabs[0].id);
-  });
+  initSession();
 });
 
 chrome.tabs.onActivated.addListener(async (info) => {
@@ -276,9 +312,10 @@ chrome.tabs.onActivated.addListener(async (info) => {
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (typeof changeInfo.url !== "string") return;
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, async function(tabs) {
-    if (tabs && tabs[0] && tabs[0].id === tabId) await switchTab(tabId);
+  const tabs = await new Promise(function(resolve) {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, function(t) { resolve(t || []); });
   });
+  if (tabs[0] && tabs[0].id === tabId) await switchTab(tabId);
 });
 
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
@@ -303,7 +340,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
-  if (STORAGE_KEYS.BLOCKED_SITES in changes || STORAGE_KEYS.BLOCKING_ENABLED in changes) {
+  if (STORAGE_KEYS.BLOCKED_SITES in changes) {
     await applyBlockRules();
   }
 });
@@ -315,3 +352,6 @@ chrome.runtime.onSuspend.addListener(async () => {
 
 // Ensure alarms on worker restart
 chrome.alarms.get("tick", function(a) { if (!a) makeAlarms(); });
+
+// Start session on worker restart
+initSession();
